@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -44,6 +45,7 @@ func main() {
 
 	// Define routes
 	r.HandleFunc("/stories", createStory).Methods("POST")
+	r.HandleFunc("/stories/{id}", deleteStory).Methods("DELETE")
 	r.HandleFunc("/health", healthCheck).Methods("GET")
 
 	// Start the server
@@ -76,6 +78,26 @@ func createStory(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(story)
+}
+
+func deleteStory(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "Invalid story ID", http.StatusBadRequest)
+		return
+	}
+
+	collection := client.Database("rosetta").Collection("stories")
+	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
