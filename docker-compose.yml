@@ -6,11 +6,17 @@ services:
       context: ./backend-api
       dockerfile: Dockerfile
     ports:
-      - "8080:8080" # Expose API on localhost:8080
+      - "8080:8080"
     environment:
       - DATABASE_URL=mongodb://story-storage:27017/stories
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_BUCKET=media
     depends_on:
       - story-storage
+      - minio
+    entrypoint: ["./wait-for-it.sh", "minio:9000", "--", "./app"]
 
   story-storage:
     image: mongo:latest
@@ -20,5 +26,23 @@ services:
     volumes:
       - story-data:/data/db
 
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - minio-data:/data
+
 volumes:
   story-data:
+  minio-data:

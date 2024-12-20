@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -19,10 +21,16 @@ import (
 )
 
 var client *mongo.Client
+var minioClient *minio.Client
+var minioBucket string
 
 func main() {
 	// Load environment variables
 	databaseURL := os.Getenv("DATABASE_URL")
+	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
+	minioRootUser := os.Getenv("MINIO_ROOT_USER")
+	minioRootPassword := os.Getenv("MINIO_ROOT_PASSWORD")
+	minioBucket = os.Getenv("MINIO_BUCKET")
 
 	// Connect to MongoDB
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -39,6 +47,28 @@ func main() {
 			log.Fatal(err)
 		}
 	}()
+
+	// Initialize MinIO client
+	minioClient, err = minio.New(minioEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(minioRootUser, minioRootPassword, ""),
+		Secure: false,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create bucket if it doesn't exist
+	exists, err := minioClient.BucketExists(ctx, minioBucket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !exists {
+		err = minioClient.MakeBucket(ctx, minioBucket, minio.MakeBucketOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Successfully created bucket:", minioBucket)
+	}
 
 	// Create a new router
 	r := mux.NewRouter()
