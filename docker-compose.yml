@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  backend-api:
+    build:
+      context: ./backend-api
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080" # Expose API on localhost:8080
+    environment:
+      - DATABASE_URL=mongodb://story-storage:27017/stories
+    depends_on:
+      - story-storage
+
+  story-storage:
+    image: mongo:latest
+    container_name: story-storage
+    ports:
+      - "27017:27017"
+    volumes:
+      - story-data:/data/db
+
+volumes:
+  story-data:
