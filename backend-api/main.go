@@ -46,6 +46,7 @@ func main() {
 	// Define routes
 	r.HandleFunc("/stories", createStory).Methods("POST")
 	r.HandleFunc("/stories/{id}", deleteStory).Methods("DELETE")
+	r.HandleFunc("/stories/{id}", updateStory).Methods("PUT")
 	r.HandleFunc("/health", healthCheck).Methods("GET")
 
 	// Start the server
@@ -98,6 +99,56 @@ func deleteStory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func updateStory(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "Invalid story ID", http.StatusBadRequest)
+		return
+	}
+
+	var story models.Story
+	err = json.NewDecoder(r.Body).Decode(&story)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Ensure segments have IDs
+	for i, segment := range story.Segments {
+		if segment.ID.IsZero() {
+			story.Segments[i].ID = primitive.NewObjectID()
+		}
+	}
+
+	collection := client.Database("rosetta").Collection("stories")
+	update := bson.M{
+		"$set": bson.M{
+			"title":        story.Title,
+			"segments":     story.Segments,
+			"is_published": story.IsPublished,
+		},
+	}
+
+	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": objectID}, update)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var updatedStory models.Story
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&updatedStory)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updatedStory)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {

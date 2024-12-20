@@ -22,11 +22,11 @@ type Segment struct {
 }
 
 type Audio struct {
-	Url string `bson:"url"`
+	Url string `bson:"url,omitempty"`
 }
 
 type Image struct {
-	Url string `bson:"url"`
+	Url string `bson:"url,omitempty"`
 }
 
 type Script struct {
