@@ -85,6 +85,7 @@ func main() {
 	r.HandleFunc("/stories/{id}", deleteStory).Methods("DELETE")
 	r.HandleFunc("/stories/{id}", updateStory).Methods("PUT")
 	r.HandleFunc("/stories/{storyId}/segments/{segmentId}/audio", generateAudioUploadURL).Methods("POST")
+	r.HandleFunc("/stories/{id}", getStory).Methods("GET")
 	r.HandleFunc("/health", healthCheck).Methods("GET")
 
 	// Start the server
@@ -217,6 +218,28 @@ func generateAudioUploadURL(w http.ResponseWriter, r *http.Request) {
 		"upload_url": presignedURL,
 		"public_url": publicURL,
 	})
+}
+
+func getStory(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "Invalid story ID", http.StatusBadRequest)
+		return
+	}
+
+	var story models.Story
+	collection := client.Database("rosetta").Collection("stories")
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&story)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(story)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
