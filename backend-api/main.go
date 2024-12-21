@@ -7,11 +7,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/mux"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -21,16 +24,20 @@ import (
 )
 
 var client *mongo.Client
-var minioClient *minio.Client
-var minioBucket string
+var s3Client *s3.S3
+var s3Bucket string
+var s3Endpoint string
+var s3PublicHost string
 
 func main() {
 	// Load environment variables
 	databaseURL := os.Getenv("DATABASE_URL")
-	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
-	minioRootUser := os.Getenv("MINIO_ROOT_USER")
-	minioRootPassword := os.Getenv("MINIO_ROOT_PASSWORD")
-	minioBucket = os.Getenv("MINIO_BUCKET")
+	awsRegion := os.Getenv("AWS_REGION")
+	awsAccessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
+	awsSecretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	s3Bucket = os.Getenv("S3_BUCKET")
+	s3Endpoint = os.Getenv("S3_ENDPOINT")
+	s3PublicHost = os.Getenv("S3_PUBLIC_URL")
 
 	// Connect to MongoDB
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -48,26 +55,26 @@ func main() {
 		}
 	}()
 
-	// Initialize MinIO client
-	minioClient, err = minio.New(minioEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(minioRootUser, minioRootPassword, ""),
-		Secure: false,
+	// Initialize AWS session
+	sess, err := session.NewSession(&aws.Config{
+		Region:           aws.String(awsRegion),
+		Credentials:      credentials.NewStaticCredentials(awsAccessKeyID, awsSecretAccessKey, ""),
+		Endpoint:         aws.String(s3Endpoint),
+		S3ForcePathStyle: aws.Bool(true), // Required for LocalStack
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Initialize S3 client
+	s3Client = s3.New(sess)
+
 	// Create bucket if it doesn't exist
-	exists, err := minioClient.BucketExists(ctx, minioBucket)
+	_, err = s3Client.CreateBucket(&s3.CreateBucketInput{
+		Bucket: aws.String(s3Bucket),
+	})
 	if err != nil {
 		log.Fatal(err)
-	}
-	if !exists {
-		err = minioClient.MakeBucket(ctx, minioBucket, minio.MakeBucketOptions{})
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("Successfully created bucket:", minioBucket)
 	}
 
 	// Create a new router
@@ -77,6 +84,7 @@ func main() {
 	r.HandleFunc("/stories", createStory).Methods("POST")
 	r.HandleFunc("/stories/{id}", deleteStory).Methods("DELETE")
 	r.HandleFunc("/stories/{id}", updateStory).Methods("PUT")
+	r.HandleFunc("/stories/{storyId}/segments/{segmentId}/audio", generateAudioUploadURL).Methods("POST")
 	r.HandleFunc("/health", healthCheck).Methods("GET")
 
 	// Start the server
@@ -179,6 +187,36 @@ func updateStory(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(updatedStory)
+}
+
+func generateAudioUploadURL(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	storyID := vars["storyId"]
+	segmentID := vars["segmentId"]
+
+	objectName := fmt.Sprintf("%s/%s/audio", storyID, segmentID)
+
+	// Generate a pre-signed URL for PUT operation
+	req, _ := s3Client.PutObjectRequest(&s3.PutObjectInput{
+		Bucket: aws.String(s3Bucket),
+		Key:    aws.String(objectName),
+	})
+	presignedURL, err := req.Presign(15 * time.Minute)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	presignedURL = strings.Replace(presignedURL, s3Endpoint, s3PublicHost, 1)
+
+	publicURL := fmt.Sprintf("%s/%s/%s", s3PublicHost, s3Bucket, objectName)
+
+	w.WriteHeader(http.StatusOK)
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false) // Disable HTML escaping
+	encoder.Encode(map[string]string{
+		"upload_url": presignedURL,
+		"public_url": publicURL,
+	})
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {

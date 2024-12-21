@@ -7,9 +7,9 @@ shift
 cmd="$@"
 
 until curl -s "$host" > /dev/null; do
-  >&2 echo "MinIO is unavailable - sleeping"
+  >&2 echo "MongoDB is unavailable - sleeping"
   sleep 1
 done
 
->&2 echo "MinIO is up - executing command"
+>&2 echo "MongoDB is up - executing command"
 exec $cmd
